@@ -1,5 +1,5 @@
-## Fork description
-This fork adds a CAN interface similar to other wiringOPi interfaces.
+## Overview
+This fork adds a CAN interface similar to other wiringOP interfaces.
 The basis was to take the code from the [libsocketcan](https://github.com/lalten/libsocketcan) library.
 
 ## Build and install
