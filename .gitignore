@@ -9,3 +9,4 @@ gpio/gpio
 examples/speed
 examples/blink
 examples/pwm
+.vscode/

@@ -49,7 +49,7 @@ LIBS    = -lm -lpthread -lrt -lcrypt
 SRC	=	wiringPi.c						\
 		wiringSerial.c wiringShift.c				\
 		piHiPri.c piThread.c					\
-		wiringPiSPI.c wiringPiI2C.c				\
+		wiringPiSPI.c wiringPiI2C.c wiringPiCAN.c	\
 		softPwm.c softTone.c					\
 		mcp23008.c mcp23016.c mcp23017.c			\
 		mcp23s08.c mcp23s17.c					\
@@ -138,6 +138,7 @@ piHiPri.o: wiringPi.h
 piThread.o: wiringPi.h
 wiringPiSPI.o: wiringPi.h wiringPiSPI.h
 wiringPiI2C.o: wiringPi.h wiringPiI2C.h
+wiringPiCAN.o: wiringPi.h wiringPiCAN.h
 softPwm.o: wiringPi.h softPwm.h
 softTone.o: wiringPi.h softTone.h
 mcp23008.o: wiringPi.h wiringPiI2C.h mcp23x0817.h mcp23008.h
