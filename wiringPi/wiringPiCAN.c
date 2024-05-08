@@ -1,7 +1,7 @@
 /*
- * wiringPiSPI.c:
- *	Simplified SPI access routines
- *	Copyright (c) 2012-2015 Gordon Henderson
+ * wiringPiCAN.c:
+ *	Simplified CAN access routines
+ *	Copyright (c) 2024 Vladislav Pavlov
  ***********************************************************************
  * This file is part of wiringPi:
  *	https://projects.drogon.net/raspberry-pi/wiringpi/
@@ -35,10 +35,12 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 
+#include <linux/if.h>
 #include <linux/if_link.h>
 #include <linux/rtnetlink.h>
 #include <linux/netlink.h>
 
+#include <linux/can.h>
 #include <linux/can/raw.h>
 #include <linux/can/netlink.h>
 
@@ -49,8 +51,7 @@
 #define IF_UP 1
 #define IF_DOWN 2
 
-#define NLMSG_TAIL(nmsg) \
-	((struct rtattr *)(((void *)(nmsg)) + NLMSG_ALIGN((nmsg)->nlmsg_len)))
+#define NLMSG_TAIL(nmsg) ((struct rtattr *)(((void *)(nmsg)) + NLMSG_ALIGN((nmsg)->nlmsg_len)))
 
 struct req_info
 {
@@ -67,15 +68,6 @@ struct set_req
 	struct ifinfomsg i;
 	char buf[1024];
 };
-
-static bool can_is_up(struct ifreq *request)
-{
-	if (request->ifr_flags & IFF_UP)
-	{
-		return true;
-	}
-	return false;
-}
 
 static int open_nl_sock(void)
 {
@@ -221,15 +213,13 @@ static int send_mod_request(int fd, struct nlmsghdr *n)
 					fprintf(stderr, "Truncated message\n");
 					return -1;
 				}
-				fprintf(stderr,
-						"!!!malformed message: len=%d\n", len);
+				fprintf(stderr, "!!!malformed message: len=%d\n", len);
 				return -1;
 			}
 
 			if (h->nlmsg_type == NLMSG_ERROR)
 			{
-				struct nlmsgerr *err =
-					(struct nlmsgerr *)NLMSG_DATA(h);
+				struct nlmsgerr *err = (struct nlmsgerr *)NLMSG_DATA(h);
 				if ((size_t)l < sizeof(struct nlmsgerr))
 				{
 					fprintf(stderr, "ERROR truncated\n");
@@ -238,8 +228,9 @@ static int send_mod_request(int fd, struct nlmsghdr *n)
 				{
 					errno = -err->error;
 					if (errno == 0)
+					{
 						return 0;
-
+					}
 					perror("RTNETLINK answers");
 				}
 				return -1;
@@ -252,7 +243,7 @@ static int send_mod_request(int fd, struct nlmsghdr *n)
 	return 0;
 }
 
-static int do_set_nl_link(int fd, __u8 if_state, const char *name, struct req_info *req_info)
+static int set_nl_link(int fd, __u8 if_state, const char *name, struct req_info *req_info)
 {
 	struct set_req req;
 
@@ -301,10 +292,14 @@ static int do_set_nl_link(int fd, __u8 if_state, const char *name, struct req_in
 		addattr_l(&req.n, sizeof(req), IFLA_INFO_DATA, NULL, 0);
 
 		if (req_info->restart_ms > 0 || req_info->disable_autorestart)
+		{
 			addattr32(&req.n, 1024, IFLA_CAN_RESTART_MS, req_info->restart_ms);
+		}
 
 		if (req_info->restart)
+		{
 			addattr32(&req.n, 1024, IFLA_CAN_RESTART, 1);
+		}
 
 		if (req_info->bittiming != NULL)
 		{
@@ -335,45 +330,14 @@ static int set_link(const char *name, __u8 if_state, struct req_info *req_info)
 
 	s = open_nl_sock();
 	if (s < 0)
+	{
 		return -1;
+	}
 
-	ret = do_set_nl_link(s, if_state, name, req_info);
+	ret = set_nl_link(s, if_state, name, req_info);
 	close(s);
 
 	return ret;
-}
-
-int wiringPiCANWrite(int s, struct can_frame *frame)
-{
-	return write(s, frame, sizeof(struct can_frame));
-}
-
-int wiringPiCANRead(int s, struct can_frame *frame)
-{
-	return read(s, frame, sizeof(struct can_frame));
-}
-
-int wiringPiCANSetFilter(int s, unsigned int id, unsigned int mask)
-{
-	struct can_filter filter = {
-		.can_id = id,
-		.can_mask = mask
-	};
-	return setsockopt(s, SOL_CAN_RAW, CAN_RAW_FILTER, &filter, sizeof(filter));
-}
-
-int wiringPiCANSetBitrate(const char *name, unsigned int bitrate)
-{
-	struct can_bittiming bt;
-
-	memset(&bt, 0, sizeof(bt));
-	bt.bitrate = bitrate;
-
-	struct req_info req_info = {
-		.bittiming = &bt,
-	};
-
-	return set_link(name, 0, &req_info);
 }
 
 static int can_start(const char *name)
@@ -386,37 +350,71 @@ static int can_stop(const char *name)
 	return set_link(name, IF_DOWN, NULL);
 }
 
-int wiringPiCANSetupInterface(const char *name, unsigned int bitrate)
+int wiringPiCANWrite(int s, unsigned int id, const unsigned char *data, int length)
 {
-	int ret;
-	int s;
-	struct sockaddr_can addr;
-	struct ifreq ifr;
+	struct can_frame frame;
 
-	s = socket(PF_CAN, SOCK_RAW, CAN_RAW);
-	if (s < 0)
+	if (length > CAN_MAX_DLEN)
 	{
-		return s;
+		return -1;
 	}
 
-	strcpy(ifr.ifr_name, name);
+	frame.can_id = id;
+	frame.len = length;
 
-	ret = ioctl(s, SIOCGIFFLAGS, &ifr);
+	memcpy(frame.data, data, length);
+
+	return write(s, &frame, sizeof(struct can_frame));
+}
+
+int wiringPiCANRead(int s, unsigned int *id, unsigned char *data, int *length)
+{
+	struct can_frame frame;
+	int ret;
+
+	ret = read(s, &frame, sizeof(struct can_frame));
+	if (ret <= 0)
+	{
+		goto exit;
+	}
+
+	*id = frame.can_id;
+	*length = frame.len;
+	memcpy(data, frame.data, frame.len);
+
+exit:
+	return ret;
+}
+
+int wiringPiCANSetFilter(int s, unsigned int id, unsigned int mask)
+{
+	struct can_filter filter[1];
+
+	filter[0].can_id = id;
+	filter[0].can_mask = mask;
+
+	return setsockopt(s, SOL_CAN_RAW, CAN_RAW_FILTER, &filter, sizeof(filter));
+}
+
+static int set_bitrate(const char *name, unsigned int bitrate)
+{
+	int ret;
+	struct can_bittiming bt;
+
+	ret = can_stop(name);
 	if (ret != 0)
 	{
 		goto err_ret;
 	}
 
-	if (can_is_up(&ifr))
-	{
-		ret = can_stop(name);
-		if (ret != 0)
-		{
-			goto err_ret;
-		}
-	}
+	memset(&bt, 0, sizeof(bt));
+	bt.bitrate = bitrate;
 
-	ret = wiringPiCANSetBitrate(name, bitrate);
+	struct req_info req_info = {
+		.bittiming = &bt,
+	};
+
+	ret = set_link(name, 0, &req_info);
 	if (ret != 0)
 	{
 		goto err_ret;
@@ -428,7 +426,31 @@ int wiringPiCANSetupInterface(const char *name, unsigned int bitrate)
 		goto err_ret;
 	}
 
-	ret = ioctl(s, SIOCGIFINDEX, &ifr);
+	return 0;
+
+err_ret:
+	return ret;
+
+}
+
+int wiringPiCANSetupInterface(const char *name, unsigned int bitrate, unsigned int loopback)
+{
+	int ret;
+	int s;
+	struct sockaddr_can addr;
+
+	if (loopback > 1)
+	{
+		return -1;
+	}
+
+	s = socket(PF_CAN, SOCK_RAW, CAN_RAW);
+	if (s < 0)
+	{
+		return s;
+	}
+
+	ret = set_bitrate(name, bitrate);
 	if (ret != 0)
 	{
 		goto err_ret;
@@ -436,10 +458,16 @@ int wiringPiCANSetupInterface(const char *name, unsigned int bitrate)
 
 	memset(&addr, 0, sizeof(addr));
 	addr.can_family = AF_CAN;
-	addr.can_ifindex = ifr.ifr_ifindex;
+	addr.can_ifindex = if_nametoindex(name);
 
 	ret = bind(s, (struct sockaddr *)&addr, sizeof(addr));
 	if (ret != 0)
+	{
+		goto err_ret;
+	}
+
+	ret = setsockopt(s, SOL_CAN_RAW, CAN_RAW_LOOPBACK, &loopback, sizeof(loopback));
+    if (ret != 0)
 	{
 		goto err_ret;
 	}
@@ -451,7 +479,9 @@ err_ret:
 	return ret;
 }
 
-int wiringPiCANClose(const char *name)
+int wiringPiCANSetup(unsigned int bitrate, unsigned int loopback)
 {
-	return can_stop(name);
+	const char *name = "can0";
+
+	return wiringPiCANSetupInterface(name, bitrate, loopback);
 }

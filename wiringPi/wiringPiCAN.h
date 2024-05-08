@@ -1,7 +1,7 @@
 /*
- * wiringPiSPI.c:
- *	Simplified SPI access routines
- *	Copyright (c) 2012-2015 Gordon Henderson
+ * wiringPiCAN.c:
+ *	Simplified CAN access routines
+ *	Copyright (c) 2024 Vladislav Pavlov
  ***********************************************************************
  * This file is part of wiringPi:
  *	https://projects.drogon.net/raspberry-pi/wiringpi/
@@ -25,18 +25,15 @@
 #ifndef	__WIRING_PI_CAN_H__
 #define	__WIRING_PI_CAN_H__
 
-#include <linux/can.h>
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-int wiringPiCANWrite(int s, struct can_frame *frame);
-int wiringPiCANRead(int s, struct can_frame *frame);
+int wiringPiCANWrite(int s, unsigned int id, const unsigned char *data, int length);
+int wiringPiCANRead(int s, unsigned int *id, unsigned char *data, int *length);
 int wiringPiCANSetFilter(int s, unsigned int id, unsigned int mask);
-int wiringPiCANSetBitrate(const char *name, unsigned int bitrate);
-int wiringPiCANSetupInterface(const char *name, unsigned int bitrate);
-int wiringPiCANClose(const char *name);
+int wiringPiCANSetupInterface(const char *name, unsigned int bitrate, unsigned int loopback);
+int wiringPiCANSetup(unsigned int bitrate, unsigned int loopback);
 
 #ifdef __cplusplus
 }
